@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -11,16 +12,28 @@ import (
 	"github.com/robfig/cron"
 )
 
-const backupDir = "D:\\backup\\"
-const sourceDir = "D:\\steamcmd\\steamapps\\common\\PalServer\\Pal\\Saved\\"
-const maxBackups = 10
+const configFile = "config.json"
+const maxBackups = 100
+
+// Config 结构体表示配置信息
+type Config struct {
+	BackupDir string `json:"backupDir"`
+	SourceDir string `json:"sourceDir"`
+}
 
 func main() {
+	// 读取配置文件，如果不存在则创建默认配置
+	config, err := readOrCreateConfig()
+	if err != nil {
+		fmt.Println("读取或创建配置文件失败:", err)
+		return
+	}
+
 	c := cron.New()
 
-	// 每十分钟执行一次备份任务
+	// 每分钟执行一次备份任务
 	c.AddFunc("*/60 * * * *", func() {
-		err := backup()
+		err := backup(config.BackupDir, config.SourceDir)
 		if err != nil {
 			fmt.Println("备份失败:", err)
 		}
@@ -32,7 +45,7 @@ func main() {
 	select {}
 }
 
-func backup() error {
+func backup(backupDir, sourceDir string) error {
 	// 创建备份目录
 	err := os.MkdirAll(backupDir, os.ModePerm)
 	if err != nil {
@@ -44,10 +57,10 @@ func backup() error {
 
 	// 备份目标路径
 	backupPath := filepath.Join(backupDir, "backup_"+timestamp) + "\\"
-
+	sourcePath := filepath.Join(sourceDir)
 	// 执行备份命令
-	// 执行备份命令
-	cmd := exec.Command("cmd", "/c", "xcopy", sourceDir, backupPath, "/E")
+	cmd := exec.Command("xcopy", sourcePath, backupPath, "/E", "/I", "/H", "/Y")
+	fmt.Println("执行命令:", cmd.String())
 
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
@@ -75,6 +88,46 @@ func backup() error {
 
 	fmt.Println("备份成功:", backupPath)
 	return nil
+}
+
+func readOrCreateConfig() (Config, error) {
+	config, err := readConfig()
+	if err != nil && os.IsNotExist(err) {
+		// 如果配置文件不存在，创建默认配置并写入文件
+		defaultConfig := Config{BackupDir: "C:/backup/", SourceDir: "C:/steamcmd/steamapps/common/PalServer/Pal/Saved/"}
+		err := writeConfig(defaultConfig)
+		if err != nil {
+			return config, err
+		}
+		return defaultConfig, nil
+	}
+	return config, err
+}
+
+func readConfig() (Config, error) {
+	var config Config
+
+	file, err := os.Open(configFile)
+	if err != nil {
+		return config, err
+	}
+	defer file.Close()
+
+	decoder := json.NewDecoder(file)
+	err = decoder.Decode(&config)
+	return config, err
+}
+
+func writeConfig(config Config) error {
+	file, err := os.Create(configFile)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	encoder := json.NewEncoder(file)
+	err = encoder.Encode(config)
+	return err
 }
 
 // 获取备份目录下的备份列表
